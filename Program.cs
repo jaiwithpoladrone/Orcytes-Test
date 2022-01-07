@@ -32,11 +32,11 @@ namespace CSharpFileUpload
                 message = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss}: Upload job started.";
                 Console.WriteLine(message);
                 apiUrl = @$"{serverUrl}api/Upload";
-                string path = @"C:\Users\Jaiprashanth\Downloads\convert\18\tile_8192_1_1.png";
+                string path = @"C:\Users\Jaiprashanth\Downloads\Terrace Area\Terrace Area\100_0308\100_0308_0002.JPG";
                // path = @"C:\Users\Jaiprashanth\Downloads\test2.mp4";
 
                 FileTask newUploadTask = new FileTask(apiUrl, token);
-                completed = newUploadTask.UploadFileAsOctetStream(path);
+                completed = newUploadTask.UploadFile(path);
                 Console.WriteLine();
                 message = completed ? "Upload completed." : "Upload failed.";
                 Console.WriteLine(message);

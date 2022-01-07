@@ -1,5 +1,6 @@
 ﻿using System.Net.Http.Headers;
 using System.Text;
+using System.Text.Json;
 using CSharpFileUpload.Models;
 using Flurl;
 using Flurl.Http;
@@ -90,9 +91,9 @@ namespace CSharpFileUpload.SupportClass
                 data_bytes = EncodeFileData(path);
             }
 
-
+            FileStream stream = new FileStream(path, FileMode.Open);
             // Post File to Web Api 
-            Task newTask = UploadFileToCloud(data_bytes, fileName);
+            Task newTask = UploadMultipartToCloud(Guid.NewGuid(),stream, fileName,"application/unknown");
             //newTask.Start();
             newTask.Wait();
             // Verify Upload
@@ -122,56 +123,62 @@ namespace CSharpFileUpload.SupportClass
             }
         }
 
-        private async Task UploadFileBytesToCloud(byte[] data, string fileName)
+        private async Task<bool> UploadMultipartToCloud(Guid id,Stream stream_data, string fileName,string contentType)
         {
+            long fileLength = stream_data.Length;
+            bool returnValue = false;
+            int chunkSize = 2097152;
+            int totalChunks = (int)(fileLength / chunkSize);
+            totalChunks = fileLength % chunkSize != 0 ? totalChunks++ : totalChunks;
 
-            using (ClientForHttp)
+            for(int i = 0; i < totalChunks; i++)
             {
-                // Bearer Token header if needed
-                ClientForHttp.DefaultRequestHeaders.Add("Authorization", "Bearer " + AuthToken);
-                ClientForHttp.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/octet-stream"));
-
-                using (var content = new ByteArrayContent(data))
+                long position = (i * (long)chunkSize);
+                int toRead = (int)Math.Min(fileLength - position+1,chunkSize);
+                byte[] buffer = new byte[toRead];
+                await stream_data.ReadAsync(buffer, 0, toRead);
+                MultipartFormDataContent content = new MultipartFormDataContent();
+                content.Add(new StringContent(id.ToString()), "id");
+                string metadata_str = JsonSerializer.Serialize(new FileMetadata()
                 {
-                    var byteTask = ClientForHttp.PostAsync(ServerAPIUrl + $"?fileName={fileName}", content);
-                    var msg = await byteTask;
-                    //Console.Write(msg);
+                    ChunkSize=chunkSize,
+                    FileUid=id.ToString(),
+                    Name=fileName,
+                    Index=i,
+                    TotalChunks=totalChunks,
+                    TotalFileSize=(int)fileLength,
+                    ContentType=contentType,
+                    Completed = i == (int)fileLength
+                });
+                content.Add(new StringContent(metadata_str), "metadata");
+                using (var ms = new MemoryStream(buffer))
+                {
+                    byte[] data_bytes = ms.ToArray();
+                    content.Add(new StringContent(Convert.ToBase64String(data_bytes)), "files");
+                    var response = await ServerAPIUrl.WithHeaders(new {Authorization="Bearer "+AuthToken,Accept="multipart/form-data" }).PostAsync(content).ConfigureAwait(false);
+                    if (response.StatusCode!=200) // If not successful
+                    {
+                        returnValue = false;
+                        break;
+                    }
                 }
-
-            }
-        }
-
-        public bool UploadFileAsOctetStream(string path)
-        {
-            bool confirmation = false;
-            // Get File from File Path
-            string fileName = Path.GetFileName(path);
-
-            // Convert File into Byte
-
-            string[] fileNameSplitArr = fileName.Split(".");
-            string fileExtension = "";
-            dynamic data_bytes;
-            if (fileNameSplitArr.Length > 1)
-            {
-                fileExtension = fileNameSplitArr[fileNameSplitArr.Length - 1].ToLower();
             }
 
-
-            data_bytes = EncodeFileDataToBytes(path);
-
-
-
-            // Post File to Web Api 
-            Task newTask = UploadFileBytesToCloud(data_bytes, fileName);
-            //newTask.Start();
-            newTask.Wait();
-            // Verify Upload
-            if (newTask.IsCompleted)
-            {
-                confirmation = true;
-            }
-            return confirmation;
+            //using (ClientForHttp)
+            //{
+            //    // Bearer Token header if needed
+            //    ClientForHttp.DefaultRequestHeaders.Add("Authorization", "Bearer " + AuthToken);
+            //    ClientForHttp.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("multipart/form-data"));
+            //    using (var content = new MultipartFormDataContent())
+            //    {
+            //        content.Add(new StringContent(fileName), "file_name");
+            //        var stringTask = ServerAPIUrl.WithHeaders(new { Accept = "multipart/form-data", Authorization = "Bearer " + AuthToken }).PostMultipartAsync(mp =>
+            //              mp.AddFile(fileName, stream_data, fileName).Add(content));
+            //        var msg = await stringTask;
+            //        Console.Write(msg);
+            //    }
+            //}
+            return returnValue;
         }
         #endregion
 
